@@ -16,7 +16,7 @@ public partial class MVPAnthem
     public readonly PluginCapability<IClientprefsApi> cookieCapabilty = new("Clientprefs");
     public IClientprefsApi? CLIENT_PREFS_API;
 
-    void LoadClientPrefs()
+    void LoadClientPrefs(bool hotReload)
     {
         try
         {
@@ -27,7 +27,12 @@ public partial class MVPAnthem
         catch (Exception ex)
         {
             Logger.LogError($"Failed to load CleintprefsApi! | {ex.Message}");
+            return;
         }
+
+        // OnDatabaseLoaded already fired before a hot reload, so register the cookies directly.
+        if (hotReload)
+            RegisterCookies();
     }
     void UnloadClientprefis()
     {
@@ -43,10 +48,53 @@ public partial class MVPAnthem
 
         foreach (CCSPlayerController player in Utilities.GetPlayers().Where(p => !p.IsBot))
         {
-            if (!CLIENT_PREFS_API.ArePlayerCookiesCached(player))
-                continue;
+            LoadPlayerCookies(player);
+        }
+    }
+    void OnClientprefDatabaseReady()
+    {
+        RegisterCookies();
+    }
+    void RegisterCookies()
+    {
+        IClientprefsApi? api = CLIENT_PREFS_API;
+        if (api == null) return;
 
+        Task.Run(async () =>
+        {
+            int mvpCookie = await api.RegPlayerCookieAsync("MVP", "Player selected MVP", CookieAccess.CookieAccess_Public);
+            int volumeCookie = await api.RegPlayerCookieAsync("Volume", "Player volume preference", CookieAccess.CookieAccess_Public);
 
+            Server.NextFrame(() =>
+            {
+                MVPCookie = mvpCookie;
+                VolumeCookie = volumeCookie;
+
+                if (MVPCookie == -1)
+                    Logger.LogError("Failed to register MVP cookie");
+
+                if (VolumeCookie == -1)
+                    Logger.LogError("Failed to register Volume cookie");
+
+                // Players whose cookies were cached before the cookie ids were ready.
+                ReloadClientprefs();
+            });
+        });
+    }
+
+    void OnPlayerCookiesCached(CCSPlayerController player)
+    {
+        if (CLIENT_PREFS_API == null || MVPCookie == -1 || VolumeCookie == -1) return;
+
+        LoadPlayerCookies(player);
+    }
+    void LoadPlayerCookies(CCSPlayerController player)
+    {
+        if (CLIENT_PREFS_API == null) return;
+
+        // GetPlayerCookie throws if the player's cookies are not loaded yet.
+        try
+        {
             string mvpValue = CLIENT_PREFS_API.GetPlayerCookie(player, MVPCookie);
             if (!string.IsNullOrEmpty(mvpValue))
                 playerMVPCookies[player] = mvpValue;
@@ -55,34 +103,9 @@ public partial class MVPAnthem
             if (!string.IsNullOrEmpty(volValue))
                 playerVolumeCookies[player] = volValue;
         }
-    }
-    void OnClientprefDatabaseReady()
-    {
-        if (CLIENT_PREFS_API == null) return;
-
-        MVPCookie = CLIENT_PREFS_API.RegPlayerCookie("MVP", "Player selected MVP", CookieAccess.CookieAccess_Public);
-        if (MVPCookie == -1)
+        catch (Exception ex)
         {
-            Logger.LogError("Failed to register MVP cookie");
+            Logger.LogDebug($"Skipped loading cookies for {player.PlayerName}: {ex.Message}");
         }
-
-        VolumeCookie = CLIENT_PREFS_API.RegPlayerCookie("Volume", "Player volume preference", CookieAccess.CookieAccess_Public);
-        if (VolumeCookie == -1)
-        {
-            Logger.LogError("Failed to register Volume cookie");
-        }
-    }
-
-    void OnPlayerCookiesCached(CCSPlayerController player)
-    {
-        if (CLIENT_PREFS_API == null || MVPCookie == -1 || VolumeCookie == -1) return;
-
-        string mvpValue = CLIENT_PREFS_API.GetPlayerCookie(player, MVPCookie);
-        if (!string.IsNullOrEmpty(mvpValue))
-            playerMVPCookies[player] = mvpValue;
-
-        string volValue = CLIENT_PREFS_API.GetPlayerCookie(player, VolumeCookie);
-        if (!string.IsNullOrEmpty(volValue))
-            playerVolumeCookies[player] = volValue;
     }
 }

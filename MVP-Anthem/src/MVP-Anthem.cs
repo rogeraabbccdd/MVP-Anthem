@@ -29,12 +29,7 @@ public partial class MVPAnthem : BasePlugin
     }
     public override void OnAllPluginsLoaded(bool hotReload)
     {
-        LoadClientPrefs();
-
-        if (hotReload)
-        {
-            ReloadClientprefs();
-        }
+        LoadClientPrefs(hotReload);
     }
     public override void Unload(bool hotReload)
     {
